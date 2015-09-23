@@ -111,7 +111,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static org.jruby.anno.FrameField.*;
 import static org.jruby.runtime.Visibility.*;
@@ -4279,7 +4282,7 @@ public class RubyModule extends RubyObject {
         // A ThreadContext which is executing autoload.
         private volatile ThreadContext ctx;
         // The lock for test-and-set the ctx.
-        private final Object ctxLock = new Object();
+        private final Lock ctxLock = new ReentrantLock();
         // An object defined for the constant while autoloading.
         private volatile IRubyObject value;
         // A method which actually requires a defined feature.
@@ -4294,27 +4297,40 @@ public class RubyModule extends RubyObject {
         // Returns an object for the constant if the caller is the autoloading thread.
         // Otherwise, try to start autoloading and returns the defined object by autoload.
         IRubyObject getConstant(ThreadContext ctx) {
-            synchronized (ctxLock) {
-                if (this.ctx == null) {
-                    this.ctx = ctx;
-                } else if (isSelf(ctx)) {
-                    return getValue();
+            for(int i = 10; i > 0; i--) {
+                try {
+                    if (ctxLock.tryLock(10, TimeUnit.MILLISECONDS)) {
+
+                        if (this.ctx == null) {
+                            this.ctx = ctx;
+                        } else if (isSelf(ctx)) {
+                            return getValue();
+                        }
+                        // This method needs to be synchronized for removing Autoload
+                        // from autoloadMap when it's loaded.
+                        getLoadMethod().load(ctx.runtime);
+                        return getValue();
+                    }
+                } catch (InterruptedException e) {
+                } finally {
+                    ctxLock.unlock();
                 }
-                // This method needs to be synchronized for removing Autoload
-                // from autoloadMap when it's loaded.
-                getLoadMethod().load(ctx.runtime);
             }
             return getValue();
         }
 
         // Update an object for the constant if the caller is the autoloading thread.
         boolean setConstant(ThreadContext ctx, IRubyObject newValue) {
-            synchronized(ctxLock) {
+            try{
+                ctxLock.lock();
                 boolean isSelf = isSelf(ctx);
 
                 if (isSelf) value = newValue;
 
                 return isSelf;
+            }
+            finally {
+                ctxLock.unlock();
             }
         }
 
