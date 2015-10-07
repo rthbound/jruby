@@ -156,10 +156,10 @@ module FileUtils
   end
   module_function :uptodate?
 
-  def remove_tailing_slash(dir)
+  def remove_trailing_slash(dir)
     dir == '/' ? dir : dir.chomp(?/)
   end
-  private_module_function :remove_tailing_slash
+  private_module_function :remove_trailing_slash
 
   #
   # Options: mode noop verbose
